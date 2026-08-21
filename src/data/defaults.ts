@@ -1,6 +1,14 @@
 import type { DistKey, MoneyItem, Product, TaxItem } from '../types/calculator'
 
-export const DIST_KEYS: DistKey[] = ['reinv', 'inv', 'imp', 'para', 'suel', 'util']
+export const DIST_KEYS: DistKey[] = [
+  'reinv',
+  'inv',
+  'imp',
+  'para',
+  'suel',
+  'deuda',
+  'util',
+]
 
 export const DIST_LABELS: Record<DistKey, string> = {
   reinv: 'Reinversión',
@@ -8,6 +16,7 @@ export const DIST_LABELS: Record<DistKey, string> = {
   imp: 'Impuestos (ISLR/IVA)',
   para: 'Deberes parafiscales',
   suel: 'Sueldos / nómina',
+  deuda: 'Deudas (cuotas)',
   util: 'Utilidad neta',
 }
 
@@ -17,16 +26,19 @@ export const DIST_COLORS: Record<DistKey, string> = {
   imp: '#B53535',
   para: '#B87A1A',
   suel: '#534AB7',
+  deuda: '#8B4513',
   util: '#0F6E56',
 }
 
+/** Suma 100; deuda en 0 hasta que el motor o el usuario la activen. */
 export const DEFAULT_DIST: Record<DistKey, number> = {
   reinv: 20,
-  inv: 15,
+  inv: 12,
   imp: 16,
   para: 9,
-  suel: 25,
-  util: 15,
+  suel: 23,
+  deuda: 0,
+  util: 20,
 }
 
 export const DEFAULT_PRODUCTS: Product[] = [

@@ -11,7 +11,16 @@ export type Product = {
   pvDivisa: PriceCurrency
 }
 
-export type DistKey = 'reinv' | 'inv' | 'imp' | 'para' | 'suel' | 'util'
+export type DistKey = 'reinv' | 'inv' | 'imp' | 'para' | 'suel' | 'deuda' | 'util'
+
+export type DistMode = 'sobrevivir' | 'crecer' | 'pagar_deuda' | 'dueno'
+
+export type DebtItem = {
+  id: string
+  desc: string
+  saldo: number
+  cuotaMensual: number
+}
 
 export type TaxBase = 'salary' | 'ingresos_mun_eur' | 'ingresos_nac_eur' | 'fixed_eur' | 'fixed'
 
@@ -44,14 +53,23 @@ export type Location = {
   ciudad: string
 }
 
+export type ProductQuoteSource = 'plan' | 'replenish'
+
+export type ProductQuoteCtx = {
+  pressurePct?: number | null
+  lastSoldUsdByProduct?: Record<string, number>
+}
+
 export type ProductComputed = {
   costoBs: number
+  pisoBs: number
   pvSugBs: number
   pvSugUSD: number
   ppubBs: number
   gananciaUnitBs: number
   gananciaTotalBs: number
   margenEfectivo: number
+  quoteSource: ProductQuoteSource
 }
 
 export type FinancialTotals = {
@@ -72,6 +90,8 @@ export type TaxTotals = {
 export type GlobalTotals = {
   capTotal: number
   gasTotal: number
+  cuotaDeudas: number
+  saldoDeudas: number
   /** @deprecated use utilAntesImpuestos — kept for compatibility */
   utilNeta: number
   utilAntesImpuestos: number
@@ -93,6 +113,8 @@ export type WeeklySaleLine = {
   costoUSD: number
   qty: number
   unitPriceBs: number
+  /** Día de la venta (YYYY-MM-DD, hora local). */
+  saleDate: string
 }
 
 /** Registro de ventas reales del negocio (no escenario de inventario). */

@@ -5,7 +5,9 @@ export type AppTab =
   | 'finanzas'
   | 'tributos'
   | 'capital'
+  | 'deudas'
   | 'ventas'
+  | 'crecimiento'
   | 'resultado'
 
 export const APP_TABS: {
@@ -19,15 +21,14 @@ export const APP_TABS: {
     id: 'productos',
     label: 'Inventario',
     title: 'Inventario',
-    subtitle: 'Productos, costos, márgenes y precios publicados (escenario).',
+    subtitle: 'Existencias actuales, costos y precio. Reponer = subir la cantidad.',
     icon: '▣',
   },
   {
     id: 'ventas',
     label: 'Ventas reales',
     title: 'Ventas reales',
-    subtitle:
-      'Registro semanal del negocio + presión cambiaria USD/EUR (IPR) para ajustar precios.',
+    subtitle: 'Anota lo que cobraste. La utilidad del mes sale de aquí.',
     icon: '▤',
   },
   {
@@ -38,18 +39,25 @@ export const APP_TABS: {
     icon: '◇',
   },
   {
-    id: 'tributos',
-    label: 'Tributos',
-    title: 'Tributos',
-    subtitle: 'Parafiscales, municipales y SENIAT (referencial).',
-    icon: '▦',
-  },
-  {
     id: 'capital',
     label: 'Capital',
     title: 'Capital',
     subtitle: 'Capital inicial y gastos fijos mensuales.',
     icon: '⬡',
+  },
+  {
+    id: 'deudas',
+    label: 'Deudas',
+    title: 'Deudas',
+    subtitle: 'Saldos y cuotas mensuales que afectan el plan de caja.',
+    icon: '◆',
+  },
+  {
+    id: 'tributos',
+    label: 'Tributos',
+    title: 'Tributos',
+    subtitle: 'Parafiscales, municipales y SENIAT (referencial).',
+    icon: '▦',
   },
   {
     id: 'resultado',
@@ -58,7 +66,28 @@ export const APP_TABS: {
     subtitle: 'Cuadro consolidado y utilidad referencial.',
     icon: '◎',
   },
+  {
+    id: 'crecimiento',
+    label: 'Crecimiento',
+    title: 'Crecimiento',
+    subtitle:
+      'Laboratorio visual de la planta: revisa cada fase antes de conectarla al perfil.',
+    icon: '🌿',
+  },
 ]
+
+/** Orden y agrupación del sidebar (flujo operación → finanzas → resumen). */
+export const SIDEBAR_GROUPS: { label: string; tabs: AppTab[] }[] = [
+  { label: 'Operación', tabs: ['productos', 'ventas'] },
+  { label: 'Finanzas', tabs: ['finanzas', 'capital', 'deudas', 'tributos'] },
+  { label: 'Resumen', tabs: ['resultado'] },
+  { label: 'Laboratorio', tabs: ['crecimiento'] },
+]
+
+const TAB_BY_ID = Object.fromEntries(APP_TABS.map((t) => [t.id, t])) as Record<
+  AppTab,
+  (typeof APP_TABS)[number]
+>
 
 export const TAB_STORAGE_KEY = 'calculadora-emprendedor-ve:tab'
 
@@ -92,9 +121,10 @@ type Props = {
   active: AppTab
   onChange: (tab: AppTab) => void
   onNavigate?: () => void
+  onAddProduct?: () => void
 }
 
-export function SidebarNav({ active, onChange, onNavigate }: Props) {
+export function SidebarNav({ active, onChange, onNavigate, onAddProduct }: Props) {
   function select(tab: AppTab) {
     onChange(tab)
     onNavigate?.()
@@ -124,23 +154,34 @@ export function SidebarNav({ active, onChange, onNavigate }: Props) {
       aria-label="Secciones de la calculadora"
       onKeyDown={onKeyDown}
     >
-      {APP_TABS.map((tab) => {
-        const selected = tab.id === active
-        return (
-          <button
-            key={tab.id}
-            type="button"
-            className={`side-link${selected ? ' active' : ''}`}
-            aria-current={selected ? 'page' : undefined}
-            onClick={() => select(tab.id)}
-          >
-            <span className="side-ico" aria-hidden>
-              {tab.icon}
-            </span>
-            <span className="side-label">{tab.label}</span>
-          </button>
-        )
-      })}
+      {SIDEBAR_GROUPS.map((group) => (
+        <div key={group.label} className="sidebar-nav-group">
+          <p className="sidebar-nav-lbl">{group.label}</p>
+          {group.tabs.map((tabId) => {
+            const tab = TAB_BY_ID[tabId]
+            const selected = tabId === active
+            return (
+              <button
+                key={tabId}
+                type="button"
+                className={`side-link${selected ? ' active' : ''}`}
+                aria-current={selected ? 'page' : undefined}
+                onClick={() => select(tabId)}
+              >
+                <span className="side-ico" aria-hidden>
+                  {tab.icon}
+                </span>
+                <span className="side-label">{tab.label}</span>
+              </button>
+            )
+          })}
+          {group.label === 'Operación' && onAddProduct ? (
+            <button type="button" className="side-cta side-cta-inline" onClick={onAddProduct}>
+              + Agregar producto
+            </button>
+          ) : null}
+        </div>
+      ))}
     </nav>
   )
 }

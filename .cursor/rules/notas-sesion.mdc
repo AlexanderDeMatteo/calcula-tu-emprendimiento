@@ -1,0 +1,19 @@
+---
+description: >-
+  Oyente de bitácora en Ask mode y con /notas: anota decisiones de producto
+  y siguientes pasos. Apunta a la skill notas-sesion.
+alwaysApply: true
+---
+
+# Bitácora de sesión
+
+Si **Ask mode** está activo y el tema es producto, alcance, UX, modelo
+financiero o prioridad — o el usuario dijo en este hilo `/notas`,
+`bitácora`, `toma nota`, `anota esto` o `siguientes pasos` — lee y aplica
+`.cursor/skills/notas-sesion/SKILL.md`.
+
+Pregunta puntual de código (qué hace X, dónde está Y) **sin** `/notas`
+en el hilo: no interrumpas con la bitácora.
+
+Una vez activo, el oyente queda ON el resto de la conversación hasta
+`/notas off`.

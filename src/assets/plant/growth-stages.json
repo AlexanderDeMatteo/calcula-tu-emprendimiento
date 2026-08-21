@@ -1,0 +1,64 @@
+{
+  "stages": [
+    {
+      "id": "semilla",
+      "level": 0,
+      "label": "Semilla",
+      "description": "Idea en validación, sin ventas estables.",
+      "art": "business-seed.png",
+      "blend": null,
+      "ready": true,
+      "criteria": "Por definir"
+    },
+    {
+      "id": "brote",
+      "level": 1,
+      "label": "Brote / tallo",
+      "description": "Primeras ventas o primeros clientes.",
+      "art": null,
+      "blend": null,
+      "ready": false,
+      "criteria": "Por definir"
+    },
+    {
+      "id": "planta_rama",
+      "level": 2,
+      "label": "Tronco + 1 rama",
+      "description": "Operación inicial con una función principal activa.",
+      "art": "business-growth-trunk-branch.png",
+      "blend": "business-growth-trunk-branch.blend",
+      "ready": true,
+      "criteria": "Por definir"
+    },
+    {
+      "id": "planta_ramas",
+      "level": 3,
+      "label": "Tronco + varias ramas",
+      "description": "Aparecen más frentes del negocio.",
+      "art": null,
+      "blend": "business-plant-modular.blend",
+      "ready": false,
+      "criteria": "Por definir"
+    },
+    {
+      "id": "planta",
+      "level": 4,
+      "label": "Planta con hojas",
+      "description": "Cada función visible con estado healthy / warning / critical.",
+      "art": "business-plant.png",
+      "blend": "business-plant-modular.blend",
+      "ready": true,
+      "criteria": "Por definir"
+    },
+    {
+      "id": "arbol",
+      "level": 5,
+      "label": "Árbol",
+      "description": "Negocio formalizado y más maduro.",
+      "art": "business-tree.png",
+      "blend": null,
+      "ready": true,
+      "criteria": "Por definir"
+    }
+  ]
+}

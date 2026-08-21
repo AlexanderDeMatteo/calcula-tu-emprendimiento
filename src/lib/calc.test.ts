@@ -21,11 +21,27 @@ const baseProduct: Product = {
 }
 
 describe('computeProductRow', () => {
-  it('calcula costo, sugerido y margen efectivo desde margen planificado', () => {
-    const row = computeProductRow(baseProduct, rates)
+  it('el markup planificado fija el sugerido si supera la reposición', () => {
+    const row = computeProductRow(baseProduct, rates, { pressurePct: 10 })
     expect(row.costoBs).toBe(5 * 40.5)
+    expect(row.pisoBs).toBeCloseTo(202.5 * 1.1, 5)
+    expect(row.pvSugBs).toBeCloseTo(202.5 * 1.4, 5)
+    expect(row.quoteSource).toBe('plan')
+    expect(row.margenEfectivo).toBeCloseTo(40, 5)
+  })
+
+  it('si el planificado está bajo la devaluación, el sugerido es el piso', () => {
+    const row = computeProductRow({ ...baseProduct, margen: 0 }, rates, { pressurePct: 10 })
+    expect(row.pvSugBs).toBeCloseTo(202.5 * 1.1, 5)
+    expect(row.quoteSource).toBe('replenish')
+    expect(row.margenEfectivo).toBeCloseTo(10, 5)
+  })
+
+  it('sin presión el sugerido es costo × (1 + markup planificado)', () => {
+    const row = computeProductRow(baseProduct, rates)
     expect(row.pvSugBs).toBeCloseTo(202.5 * 1.4, 5)
     expect(row.margenEfectivo).toBeCloseTo(40, 5)
+    expect(row.quoteSource).toBe('plan')
   })
 
   it('usa pvRef USD como override del sugerido', () => {
@@ -88,6 +104,49 @@ describe('computeTaxes', () => {
     expect(taxes.amounts.ivss_w).toBe(40)
   })
 
+  it('no suma tributos con check inactivo', () => {
+    const taxes = computeTaxes({
+      parafiscales: [
+        {
+          key: 'ivss',
+          nombre: 'IVSS',
+          desc: '',
+          rate: 11,
+          base: 'salary',
+          active: false,
+          employer: true,
+        },
+      ],
+      municipales: [
+        {
+          key: 'isae',
+          nombre: 'ISAE',
+          desc: '',
+          rate: 1.5,
+          base: 'ingresos_mun_eur',
+          active: false,
+        },
+      ],
+      nacionales: [
+        {
+          key: 'iva',
+          nombre: 'IVA',
+          desc: '',
+          rate: 16,
+          base: 'ingresos_nac_eur',
+          active: false,
+        },
+      ],
+      salarioBs: 1000,
+      ingMunEUR: 100,
+      ingNacEUR: 100,
+      rates,
+    })
+    expect(taxes.paraTotal).toBe(0)
+    expect(taxes.munTotal).toBe(0)
+    expect(taxes.nacTotal).toBe(0)
+  })
+
   it('calcula municipales e IVA referencial sobre base EUR', () => {
     const municipales: TaxItem[] = [
       {
@@ -140,9 +199,24 @@ describe('computeGlobal', () => {
     expect(global.capTotal).toBe(100)
   })
 
+  it('resta cuotas de deuda de la utilidad antes de tributos', () => {
+    const fin = computeFinancialSummary([baseProduct], rates, 0)
+    const global = computeGlobal(
+      fin,
+      [],
+      [{ id: 'g1', desc: 'gas', monto: 50 }],
+      { paraTotal: 0, munTotal: 0, nacTotal: 0 },
+      [{ id: 'd1', desc: 'prestamo', saldo: 1000, cuotaMensual: 30 }],
+    )
+    expect(global.cuotaDeudas).toBe(30)
+    expect(global.saldoDeudas).toBe(1000)
+    expect(global.utilAntesImpuestos).toBeCloseTo(fin.ganNet - 50 - 30, 5)
+  })
+
   it('calcula punto de equilibrio sobre ganancia bruta', () => {
     const fin = computeFinancialSummary([baseProduct], rates, 0)
     const global = computeGlobal(fin, [], [{ id: 'g1', desc: 'gas', monto: fin.ganBs / 2 }])
+    expect(fin.ganBs).toBeGreaterThan(0)
     expect(global.puntoEquilibrioPct).toBeCloseTo(50, 5)
   })
 })

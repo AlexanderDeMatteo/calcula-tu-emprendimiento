@@ -10,6 +10,15 @@ import {
 } from '../lib/calc'
 import { formatTimestamp } from '../lib/format'
 import {
+  fetchFxHistory,
+  loadFxHistoryCache,
+  localIsoDate,
+  pressureFromHistory,
+  resolvePressurePct,
+  saveFxHistoryCache,
+  type FxHistoryCache,
+} from '../lib/fxPressure'
+import {
   clearPersistedState,
   defaultPersistedState,
   loadPersistedState,
@@ -17,15 +26,27 @@ import {
   type PersistedState,
 } from '../lib/storage'
 import {
+  availableStock,
+  computeMonthRealProfit,
+  findWeekForDate,
+  lastSoldUsdByProduct,
   summarizeWeeklySales,
+  todayIsoDate,
   weekEndFromStart,
   weekSalesBsFromLines,
   weekStartFromDate,
 } from '../lib/weeklySales'
+import {
+  reinvPctFromPlan,
+  suggestDistribution,
+} from '../lib/suggestDistribution'
+import { derivePlantLeaves, derivePlantStage, deriveQuickLinks } from '../lib/plant'
 import type {
   BcvFetchStatus,
   Currency,
+  DebtItem,
   DistKey,
+  DistMode,
   Location,
   MoneyItem,
   PriceCurrency,
@@ -36,6 +57,7 @@ import type {
   WeeklySaleLine,
   WeeklySales,
 } from '../types/calculator'
+import { defaultBusinessProfile, type BusinessProfile } from '../types/profile'
 
 function uid(prefix: string) {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`
@@ -66,6 +88,8 @@ export function useCalculator() {
   const [products, setProducts] = useState<Product[]>(initial.products)
   const [reinvPct, setReinvPct] = useState(initial.reinvPct)
   const [dist, setDist] = useState<Record<DistKey, number>>(initial.dist)
+  const [distMode, setDistModeState] = useState<DistMode>(initial.distMode)
+  const [distManual, setDistManual] = useState(initial.distManual)
   const [parafiscales, setParafiscales] = useState(initial.parafiscales)
   const [municipales, setMunicipales] = useState(initial.municipales)
   const [nacionales, setNacionales] = useState(initial.nacionales)
@@ -75,12 +99,38 @@ export function useCalculator() {
   const [ingresosNacEUR, setIngresosNacEUR] = useState(initial.ingresosNacEUR)
   const [capitalItems, setCapitalItems] = useState(initial.capitalItems)
   const [gastosItems, setGastosItems] = useState(initial.gastosItems)
+  const [debtItems, setDebtItems] = useState<DebtItem[]>(initial.debtItems)
   const [weeklySales, setWeeklySales] = useState<WeeklySales[]>(initial.weeklySales)
   const [iprAlertPct, setIprAlertPct] = useState(initial.iprAlertPct)
+  const [fxCache, setFxCache] = useState<FxHistoryCache | null>(() => loadFxHistoryCache())
+  const [profile, setProfile] = useState<BusinessProfile>(initial.profile)
+
+  const weeklySalesSummary = useMemo(
+    () => summarizeWeeklySales(weeklySales, iprAlertPct),
+    [weeklySales, iprAlertPct],
+  )
+
+  const latestIprPct = weeklySalesSummary.latest?.ipr ?? null
+  const lastSoldMap = useMemo(() => lastSoldUsdByProduct(weeklySales), [weeklySales])
+  const historyPressurePct = useMemo(
+    () =>
+      fxCache
+        ? pressureFromHistory(fxCache.usdOficial, fxCache.eurOficial, rates)
+        : null,
+    [fxCache, rates],
+  )
+  const pressurePct = useMemo(
+    () => resolvePressurePct(historyPressurePct, latestIprPct),
+    [historyPressurePct, latestIprPct],
+  )
+  const quoteCtx = useMemo(
+    () => ({ pressurePct, lastSoldUsdByProduct: lastSoldMap }),
+    [pressurePct, lastSoldMap],
+  )
 
   const financial = useMemo(
-    () => computeFinancialSummary(products, rates, reinvPct),
-    [products, rates, reinvPct],
+    () => computeFinancialSummary(products, rates, reinvPct, quoteCtx),
+    [products, rates, reinvPct, quoteCtx],
   )
 
   const salarioBs = useMemo(
@@ -111,18 +161,46 @@ export function useCalculator() {
   )
 
   const global = useMemo(
-    () => computeGlobal(financial, capitalItems, gastosItems, taxes),
-    [financial, capitalItems, gastosItems, taxes],
+    () => computeGlobal(financial, capitalItems, gastosItems, taxes, debtItems),
+    [financial, capitalItems, gastosItems, taxes, debtItems],
+  )
+
+  const monthReal = useMemo(
+    () =>
+      computeMonthRealProfit({
+        weeks: weeklySales,
+        gasTotal: global.gasTotal,
+        cuotaDeudas: global.cuotaDeudas,
+        tributosRef: global.tributosRef,
+      }),
+    [weeklySales, global.gasTotal, global.cuotaDeudas, global.tributosRef],
+  )
+
+  const distSuggestion = useMemo(
+    () =>
+      suggestDistribution({
+        venBs: financial.venBs,
+        gasTotal: global.gasTotal,
+        paraTotal: taxes.paraTotal,
+        munTotal: taxes.munTotal,
+        nacTotal: taxes.nacTotal,
+        cuotaDeudas: global.cuotaDeudas,
+        mode: distMode,
+      }),
+    [
+      financial.venBs,
+      global.gasTotal,
+      global.cuotaDeudas,
+      taxes.paraTotal,
+      taxes.munTotal,
+      taxes.nacTotal,
+      distMode,
+    ],
   )
 
   const distSum = useMemo(
     () => Object.values(dist).reduce((acc, n) => acc + n, 0),
     [dist],
-  )
-
-  const weeklySalesSummary = useMemo(
-    () => summarizeWeeklySales(weeklySales, iprAlertPct),
-    [weeklySales, iprAlertPct],
   )
 
   const snapshot = useCallback((): PersistedState => {
@@ -135,6 +213,8 @@ export function useCalculator() {
       products,
       reinvPct,
       dist,
+      distMode,
+      distManual,
       parafiscales,
       municipales,
       nacionales,
@@ -144,8 +224,12 @@ export function useCalculator() {
       ingresosNacEUR,
       capitalItems,
       gastosItems,
+      debtItems,
       weeklySales,
       iprAlertPct,
+      inflationRefPct: null,
+      stockKardexApplied: true,
+      profile,
     }
   }, [
     rates,
@@ -156,6 +240,8 @@ export function useCalculator() {
     products,
     reinvPct,
     dist,
+    distMode,
+    distManual,
     parafiscales,
     municipales,
     nacionales,
@@ -165,8 +251,10 @@ export function useCalculator() {
     ingresosNacEUR,
     capitalItems,
     gastosItems,
+    debtItems,
     weeklySales,
     iprAlertPct,
+    profile,
   ])
 
   useEffect(() => {
@@ -196,6 +284,27 @@ export function useCalculator() {
     [draftRates, rates],
   )
 
+  const refreshFxHistoryCache = useCallback(async () => {
+    const today = localIsoDate()
+    let cached = loadFxHistoryCache()
+    if (!cached || cached.fetchedAt !== today) {
+      try {
+        const fresh = await fetchFxHistory()
+        if (fresh.usdOficial.length > 0) {
+          cached = {
+            fetchedAt: today,
+            usdOficial: fresh.usdOficial,
+            eurOficial: fresh.eurOficial,
+          }
+          saveFxHistoryCache(cached)
+        }
+      } catch {
+        // keep last cache; pressure will fall back to IPR if needed
+      }
+    }
+    if (cached) setFxCache(cached)
+  }, [])
+
   const refreshRatesFromBcv = useCallback(async () => {
     setBcvStatus('loading')
     setBcvError(null)
@@ -213,7 +322,8 @@ export function useCalculator() {
       setBcvStatus('error')
       setBcvError('No se pudo obtener la tasa. Usa el valor manual o reintenta.')
     }
-  }, [])
+    void refreshFxHistoryCache()
+  }, [refreshFxHistoryCache])
 
   useEffect(() => {
     void refreshRatesFromBcv()
@@ -221,6 +331,7 @@ export function useCalculator() {
 
   function resetScenario() {
     const fresh = defaultPersistedState(formatTimestamp(new Date()))
+    const keepProfile = profile
     clearPersistedState()
     skipNextSave.current = true
     setRates(fresh.rates)
@@ -229,10 +340,12 @@ export function useCalculator() {
     setRatesSource('manual')
     setBcvStatus('idle')
     setBcvError(null)
-    setLocation(fresh.location)
+    setLocation({ estado: keepProfile.estado || fresh.location.estado, ciudad: keepProfile.ciudad || fresh.location.ciudad })
     setProducts(fresh.products)
     setReinvPct(fresh.reinvPct)
     setDist(fresh.dist)
+    setDistModeState(fresh.distMode)
+    setDistManual(fresh.distManual)
     setParafiscales(fresh.parafiscales)
     setMunicipales(fresh.municipales)
     setNacionales(fresh.nacionales)
@@ -242,8 +355,48 @@ export function useCalculator() {
     setIngresosNacEUR(fresh.ingresosNacEUR)
     setCapitalItems(fresh.capitalItems)
     setGastosItems(fresh.gastosItems)
+    setDebtItems(fresh.debtItems)
     setWeeklySales(fresh.weeklySales)
     setIprAlertPct(fresh.iprAlertPct)
+    setProfile(keepProfile)
+  }
+
+  function completeOnboarding(next: BusinessProfile) {
+    const safe: BusinessProfile = { ...defaultBusinessProfile(), ...next, complete: true }
+    setProfile(safe)
+    setLocation({ estado: safe.estado, ciudad: safe.ciudad })
+    setDistMode(safe.monthFocus)
+    if (safe.hasDebt === false) setDebtItems([])
+    if (safe.hasFormalEmployees === false) {
+      setSalario(0)
+      setSalarioDivisa('bs')
+    }
+    setProducts((prev) => {
+      if (prev.length > 0) return prev
+      return [
+        {
+          id: uid('p'),
+          desc:
+            safe.model === 'servicio'
+              ? 'Servicio principal'
+              : safe.model === 'mixto'
+                ? 'Producto / servicio principal'
+                : 'Producto principal',
+          cant: 1,
+          costoUSD: 1,
+          margen: 30,
+          pvRef: 0,
+          pvDivisa: 'usd',
+        },
+      ]
+    })
+    setGastosItems((prev) =>
+      prev.map((item) =>
+        item.id === 'g1' && safe.site === 'digital'
+          ? { ...item, desc: 'Espacio digital / herramientas', monto: item.monto }
+          : item,
+      ),
+    )
   }
 
   function fillTaxBaseFromSales() {
@@ -276,7 +429,54 @@ export function useCalculator() {
   }
 
   function setDistValue(key: DistKey, value: number) {
+    setDistManual(true)
     setDist((prev) => ({ ...prev, [key]: value }))
+  }
+
+  function applySuggestedDist(mode = distMode) {
+    const suggestion = suggestDistribution({
+      venBs: financial.venBs,
+      gasTotal: global.gasTotal,
+      paraTotal: taxes.paraTotal,
+      munTotal: taxes.munTotal,
+      nacTotal: taxes.nacTotal,
+      cuotaDeudas: global.cuotaDeudas,
+      mode,
+    })
+    setDist(suggestion.dist)
+    setDistManual(false)
+    const nextReinv = reinvPctFromPlan(
+      financial.venBs,
+      financial.ganBs,
+      suggestion.dist.reinv,
+    )
+    if (nextReinv !== null) setReinvPct(nextReinv)
+    return suggestion
+  }
+
+  function setDistMode(mode: DistMode) {
+    setDistModeState(mode)
+    applySuggestedDist(mode)
+  }
+
+  function updateDebtItem(id: string, patch: Partial<DebtItem>) {
+    setDebtItems((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)))
+  }
+
+  function removeDebtItem(id: string) {
+    setDebtItems((prev) => prev.filter((d) => d.id !== id))
+  }
+
+  function addDebtItem() {
+    setDebtItems((prev) => [
+      ...prev,
+      {
+        id: uid('d'),
+        desc: 'Nueva deuda',
+        saldo: 0,
+        cuotaMensual: 0,
+      },
+    ])
   }
 
   function updateTax(
@@ -321,6 +521,27 @@ export function useCalculator() {
     return { ...row, lines, salesBs: weekSalesBsFromLines(lines) }
   }
 
+  function adjustStock(productId: string, delta: number): boolean {
+    let ok = false
+    setProducts((prev) => {
+      const product = prev.find((p) => p.id === productId)
+      if (!product) return prev
+      if (delta >= 0) {
+        ok = true
+        return prev.map((p) =>
+          p.id === productId ? { ...p, cant: (p.cant || 0) + delta } : p,
+        )
+      }
+      const need = -delta
+      if (availableStock(product.cant) < need) return prev
+      ok = true
+      return prev.map((p) =>
+        p.id === productId ? { ...p, cant: availableStock(p.cant) - need } : p,
+      )
+    })
+    return ok
+  }
+
   function addWeeklySale(partial?: Partial<WeeklySales>) {
     const start = partial?.weekStart || weekStartFromDate(new Date())
     const lines = partial?.lines ?? []
@@ -355,24 +576,30 @@ export function useCalculator() {
   }
 
   function removeWeeklySale(id: string) {
+    const week = weeklySales.find((r) => r.id === id)
+    for (const line of week?.lines ?? []) {
+      if (line.productId && line.qty > 0) adjustStock(line.productId, line.qty)
+    }
     setWeeklySales((prev) => prev.filter((r) => r.id !== id))
   }
 
   function addWeeklySaleLine(weekId: string, productId: string) {
     const product = products.find((p) => p.id === productId)
     if (!product) return
-    const computed = computeProductRow(product, rates)
-    const line: WeeklySaleLine = {
-      id: uid('wl'),
-      productId: product.id,
-      desc: product.desc,
-      costoUSD: product.costoUSD,
-      qty: 1,
-      unitPriceBs: computed.ppubBs,
-    }
+    if (!adjustStock(product.id, -1)) return
+    const computed = computeProductRow(product, rates, quoteCtx)
     setWeeklySales((prev) =>
       prev.map((row) => {
         if (row.id !== weekId) return row
+        const line: WeeklySaleLine = {
+          id: uid('wl'),
+          productId: product.id,
+          desc: product.desc,
+          costoUSD: product.costoUSD,
+          qty: 1,
+          unitPriceBs: computed.ppubBs,
+          saleDate: row.weekStart,
+        }
         return syncSalesBsFromLines({
           ...row,
           lines: [...(row.lines ?? []), line],
@@ -381,16 +608,82 @@ export function useCalculator() {
     )
   }
 
+  function addDailySaleLine(input: {
+    date?: string
+    productId: string
+    qty: number
+    unitPriceBs?: number
+  }): boolean {
+    const product = products.find((p) => p.id === input.productId)
+    if (!product) return false
+    const saleDate = input.date || todayIsoDate()
+    const computed = computeProductRow(product, rates, quoteCtx)
+    const unitPriceBs = input.unitPriceBs ?? computed.ppubBs
+    const qty = input.qty > 0 ? input.qty : 1
+    if (!adjustStock(product.id, -qty)) return false
+
+    setWeeklySales((prev) => {
+      let week = findWeekForDate(prev, saleDate)
+      let rows = prev
+      if (!week) {
+        const [y, mo, d] = saleDate.split('-').map(Number)
+        const start = weekStartFromDate(new Date(y, mo - 1, d))
+        week = {
+          id: uid('w'),
+          weekStart: start,
+          weekEnd: weekEndFromStart(start),
+          salesBs: 0,
+          salesUsd: 0,
+          rateUsdStart: rates.bcv,
+          rateUsdEnd: rates.bcv,
+          rateEurStart: rates.eur,
+          rateEurEnd: rates.eur,
+          notes: '',
+          lines: [],
+        }
+        rows = [...prev, week]
+      }
+
+      const line: WeeklySaleLine = {
+        id: uid('wl'),
+        productId: product.id,
+        desc: product.desc,
+        costoUSD: product.costoUSD,
+        qty,
+        unitPriceBs,
+        saleDate,
+      }
+
+      return rows.map((row) => {
+        if (row.id !== week!.id) return row
+        return syncSalesBsFromLines({
+          ...row,
+          lines: [...(row.lines ?? []), line],
+        })
+      })
+    })
+    return true
+  }
+
   function updateWeeklySaleLine(
     weekId: string,
     lineId: string,
-    patch: Partial<Pick<WeeklySaleLine, 'qty' | 'unitPriceBs' | 'desc'>>,
+    patch: Partial<Pick<WeeklySaleLine, 'qty' | 'unitPriceBs' | 'desc' | 'saleDate'>>,
   ) {
+    const week = weeklySales.find((r) => r.id === weekId)
+    const line = week?.lines?.find((l) => l.id === lineId)
+    if (!line) return
+    if (patch.qty != null && Number.isFinite(patch.qty)) {
+      const nextQty = Math.max(0, patch.qty)
+      const delta = line.qty - nextQty
+      if (delta !== 0 && !adjustStock(line.productId, delta)) return
+      patch = { ...patch, qty: nextQty }
+    }
     setWeeklySales((prev) =>
       prev.map((row) => {
         if (row.id !== weekId) return row
-        const lines = (row.lines ?? []).map((line) =>
-          line.id === lineId ? { ...line, ...patch } : line,
+        const lines = (row.lines ?? []).map((item) =>
+          item.id === lineId ? { ...item, ...patch } : item,
         )
         return syncSalesBsFromLines({ ...row, lines })
       }),
@@ -398,10 +691,13 @@ export function useCalculator() {
   }
 
   function removeWeeklySaleLine(weekId: string, lineId: string) {
+    const week = weeklySales.find((r) => r.id === weekId)
+    const line = week?.lines?.find((l) => l.id === lineId)
+    if (line?.productId && line.qty > 0) adjustStock(line.productId, line.qty)
     setWeeklySales((prev) =>
       prev.map((row) => {
         if (row.id !== weekId) return row
-        const lines = (row.lines ?? []).filter((line) => line.id !== lineId)
+        const lines = (row.lines ?? []).filter((item) => item.id !== lineId)
         const next = { ...row, lines }
         if (lines.length === 0) return next
         return syncSalesBsFromLines(next)
@@ -434,6 +730,12 @@ export function useCalculator() {
     lastUpdate,
     location,
     setLocation,
+    profile,
+    setProfile,
+    completeOnboarding,
+    plantStage: derivePlantStage(profile),
+    plantLeaves: derivePlantLeaves(profile),
+    plantQuickLinks: deriveQuickLinks(profile),
     products,
     addProduct,
     updateProduct,
@@ -443,6 +745,11 @@ export function useCalculator() {
     dist,
     setDistValue,
     distSum,
+    distMode,
+    setDistMode,
+    distManual,
+    distSuggestion,
+    applySuggestedDist,
     parafiscales,
     municipales,
     nacionales,
@@ -462,14 +769,21 @@ export function useCalculator() {
     updateMoneyItem,
     removeMoneyItem,
     addMoneyItem,
+    debtItems,
+    addDebtItem,
+    updateDebtItem,
+    removeDebtItem,
     weeklySales,
     weeklySalesSummary,
     iprAlertPct,
     setIprAlertPct,
+    quoteCtx,
+    pressurePct,
     addWeeklySale,
     updateWeeklySale,
     removeWeeklySale,
     addWeeklySaleLine,
+    addDailySaleLine,
     updateWeeklySaleLine,
     removeWeeklySaleLine,
     fillWeeklyRatesFromCurrent,
@@ -477,6 +791,7 @@ export function useCalculator() {
     financial,
     taxes,
     global,
+    monthReal,
   }
 }
 

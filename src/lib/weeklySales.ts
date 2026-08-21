@@ -1,4 +1,5 @@
 import type {
+  Product,
   WeeklySaleLine,
   WeeklySales,
   WeeklySalesComputed,
@@ -137,6 +138,26 @@ export function summarizeWeeklySales(
 
 export type WeeklySalesSummary = ReturnType<typeof summarizeWeeklySales>
 
+/** Último precio cobrado por producto, en USD de esa semana (unitPriceBs / rateUsdEnd). */
+export function lastSoldUsdByProduct(weeks: WeeklySales[]): Record<string, number> {
+  const sorted = [...weeks].sort((a, b) => {
+    const ae = a.weekEnd || a.weekStart
+    const be = b.weekEnd || b.weekStart
+    return ae.localeCompare(be)
+  })
+  const map: Record<string, number> = {}
+  for (const week of sorted) {
+    const rate = week.rateUsdEnd || 0
+    if (!(rate > 0)) continue
+    for (const line of week.lines ?? []) {
+      if (!line.productId) continue
+      if (!(line.qty > 0) || !(line.unitPriceBs > 0)) continue
+      map[line.productId] = line.unitPriceBs / rate
+    }
+  }
+  return map
+}
+
 /** Lunes de la semana ISO-ish en local YYYY-MM-DD */
 export function weekStartFromDate(d = new Date()): string {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate())
@@ -159,7 +180,158 @@ function toIsoDate(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
+export function todayIsoDate(d = new Date()): string {
+  return toIsoDate(d)
+}
+
 function parseIsoDate(iso: string): Date {
   const [y, m, d] = iso.split('-').map(Number)
   return new Date(y, m - 1, d)
+}
+
+export function isSameCalendarMonth(isoDate: string, ref: Date): boolean {
+  const d = parseIsoDate(isoDate)
+  return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth()
+}
+
+export type MonthRealProfit = {
+  hasSales: boolean
+  salesBs: number
+  costBs: number
+  contribBs: number
+  utilMes: number
+  lineCount: number
+  monthLabel: string
+}
+
+/** Utilidad del mes calendario desde ventas reales (no escenario de inventario). */
+export function computeMonthRealProfit(params: {
+  weeks: WeeklySales[]
+  gasTotal: number
+  cuotaDeudas: number
+  tributosRef: number
+  refDate?: Date
+}): MonthRealProfit {
+  const ref = params.refDate ?? new Date()
+  const y = ref.getFullYear()
+  const m = ref.getMonth()
+  let salesBs = 0
+  let costBs = 0
+  let lineCount = 0
+
+  for (const week of params.weeks) {
+    const rate = week.rateUsdEnd || 0
+    for (const line of week.lines ?? []) {
+      const saleDate = line.saleDate || week.weekStart
+      const d = parseIsoDate(saleDate)
+      if (d.getFullYear() !== y || d.getMonth() !== m) continue
+      salesBs += lineRevenueBs(line)
+      costBs += lineCostBs(line, rate)
+      lineCount++
+    }
+  }
+
+  const contribBs = salesBs - costBs
+  const hasSales = lineCount > 0
+  const utilMes = hasSales
+    ? contribBs - params.gasTotal - params.cuotaDeudas - params.tributosRef
+    : 0
+
+  return {
+    hasSales,
+    salesBs,
+    costBs,
+    contribBs,
+    utilMes,
+    lineCount,
+    monthLabel: `${y}-${String(m + 1).padStart(2, '0')}`,
+  }
+}
+
+/** Semana que contiene la fecha, o null si no hay coincidencia exacta por weekStart. */
+export function findWeekForDate(weeks: WeeklySales[], dateIso: string): WeeklySales | null {
+  const d = parseIsoDate(dateIso)
+  for (const week of weeks) {
+    const start = parseIsoDate(week.weekStart)
+    const end = parseIsoDate(week.weekEnd || weekEndFromStart(week.weekStart))
+    if (d >= start && d <= end) return week
+  }
+  return weeks.find((w) => w.weekStart === weekStartFromDate(d)) ?? null
+}
+
+export type MonthSaleLineRow = {
+  weekId: string
+  line: WeeklySaleLine
+  rateUsdEnd: number
+}
+
+/** Líneas de venta del mes calendario, ordenadas por día (más reciente primero). */
+export function listMonthSaleLines(
+  weeks: WeeklySales[],
+  refDate = new Date(),
+): MonthSaleLineRow[] {
+  const rows: MonthSaleLineRow[] = []
+  for (const week of weeks) {
+    const rate = week.rateUsdEnd || 0
+    for (const line of week.lines ?? []) {
+      const saleDate = line.saleDate || week.weekStart
+      if (!isSameCalendarMonth(saleDate, refDate)) continue
+      rows.push({ weekId: week.id, line, rateUsdEnd: rate })
+    }
+  }
+  return rows.sort(
+    (a, b) =>
+      (b.line.saleDate || '').localeCompare(a.line.saleDate || '') ||
+      a.line.desc.localeCompare(b.line.desc),
+  )
+}
+
+export type MonthSaleDayGroup = {
+  date: string
+  rows: MonthSaleLineRow[]
+}
+
+export function groupMonthSaleLines(rows: MonthSaleLineRow[]): MonthSaleDayGroup[] {
+  const map = new Map<string, MonthSaleLineRow[]>()
+  for (const row of rows) {
+    const date = row.line.saleDate || ''
+    const list = map.get(date) ?? []
+    list.push(row)
+    map.set(date, list)
+  }
+  return [...map.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([date, groupRows]) => ({ date, rows: groupRows }))
+}
+
+export function formatWeekRange(weekStart: string, weekEnd: string): string {
+  if (!weekStart) return '—'
+  if (!weekEnd || weekEnd === weekStart) return weekStart
+  return `${weekStart} – ${weekEnd}`
+}
+
+export function availableStock(cant: number): number {
+  return Number.isFinite(cant) && cant > 0 ? cant : 0
+}
+
+export function soldQtyByProduct(weeks: WeeklySales[]): Record<string, number> {
+  const map: Record<string, number> = {}
+  for (const week of weeks) {
+    for (const line of week.lines ?? []) {
+      if (!line.productId) continue
+      map[line.productId] = (map[line.productId] || 0) + (line.qty || 0)
+    }
+  }
+  return map
+}
+
+export function applyOpeningStock(
+  products: Product[],
+  soldMap: Record<string, number>,
+): Product[] {
+  return products.map((p) => {
+    const sold = soldMap[p.id] || 0
+    if (!(sold > 0)) return p
+    return { ...p, cant: Math.max(0, (p.cant || 0) - sold) }
+  })
 }

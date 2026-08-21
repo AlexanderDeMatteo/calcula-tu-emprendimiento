@@ -1,0 +1,44 @@
+{
+  "canvas": { "width": 256, "height": 256 },
+  "base": "meshy-base.png",
+  "preview": "meshy-assembled-preview.png",
+  "alertPreview": "meshy-alert-preview.png",
+  "source": "business-plant-modular.blend",
+  "leaves": [
+    {
+      "slot": 1,
+      "position": "top",
+      "healthy": "meshy-leaf-1-healthy.png",
+      "warning": "meshy-leaf-1-warning.png",
+      "critical": "meshy-leaf-1-critical.png"
+    },
+    {
+      "slot": 2,
+      "position": "upper-left",
+      "healthy": "meshy-leaf-2-healthy.png",
+      "warning": "meshy-leaf-2-warning.png",
+      "critical": "meshy-leaf-2-critical.png"
+    },
+    {
+      "slot": 3,
+      "position": "upper-right",
+      "healthy": "meshy-leaf-3-healthy.png",
+      "warning": "meshy-leaf-3-warning.png",
+      "critical": "meshy-leaf-3-critical.png"
+    },
+    {
+      "slot": 4,
+      "position": "lower-left",
+      "healthy": "meshy-leaf-4-healthy.png",
+      "warning": "meshy-leaf-4-warning.png",
+      "critical": "meshy-leaf-4-critical.png"
+    },
+    {
+      "slot": 5,
+      "position": "lower-right",
+      "healthy": "meshy-leaf-5-healthy.png",
+      "warning": "meshy-leaf-5-warning.png",
+      "critical": "meshy-leaf-5-critical.png"
+    }
+  ]
+}

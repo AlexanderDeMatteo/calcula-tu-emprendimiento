@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CapitalExpenses } from './components/CapitalExpenses'
+import { DebtsPanel } from './components/DebtsPanel'
+import { BusinessPlant } from './components/BusinessPlant'
 import { FinancialSummary } from './components/FinancialSummary'
 import { GlobalOverview } from './components/GlobalOverview'
 import { IncomeDistribution } from './components/IncomeDistribution'
@@ -13,6 +15,8 @@ import {
   type AppTab,
 } from './components/TabNav'
 import { TaxPanel } from './components/TaxPanel'
+import { OnboardingWizard } from './components/OnboardingWizard'
+import { GrowthPreview } from './components/GrowthPreview'
 import { TopbarRates } from './components/TopbarRates'
 import { WeeklySalesPanel } from './components/WeeklySalesPanel'
 import { useCalculator } from './hooks/useCalculator'
@@ -37,6 +41,15 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [navOpen])
 
+  if (!calc.profile.complete) {
+    return (
+      <OnboardingWizard
+        initial={calc.profile}
+        onComplete={(profile) => calc.completeOnboarding(profile)}
+      />
+    )
+  }
+
   return (
     <div className={`app-shell${navOpen ? ' nav-open' : ''}`}>
       <div
@@ -46,33 +59,42 @@ export default function App() {
       />
 
       <aside className="sidebar" aria-label="Navegación principal">
-        <div className="sidebar-brand">
-          <div className="logo-box">LD</div>
-          <div>
-            <div className="logo-name">LEDEZMA</div>
-            <div className="logo-sub">Emprendedor VE</div>
+        <div className="sidebar-top">
+          <div className="sidebar-brand">
+            <div className="logo-box">LD</div>
+            <div>
+              <div className="logo-name">LEDEZMA</div>
+              <div className="logo-sub">Emprendedor VE</div>
+            </div>
           </div>
+          <p className="sidebar-session">
+            {calc.profile.name.trim() || 'Tu negocio'} · solo este dispositivo
+          </p>
         </div>
 
-        <p className="sidebar-session">Escenario activo · solo este dispositivo</p>
+        <div className="sidebar-body">
+          <SidebarNav
+            active={tab}
+            onChange={setTab}
+            onNavigate={() => setNavOpen(false)}
+            onAddProduct={() => {
+              setTab('productos')
+              setNavOpen(false)
+              calc.addProduct()
+            }}
+          />
 
-        <button
-          type="button"
-          className="side-cta"
-          onClick={() => {
-            setTab('productos')
-            setNavOpen(false)
-            calc.addProduct()
-          }}
-        >
-          + Agregar producto
-        </button>
-
-        <SidebarNav
-          active={tab}
-          onChange={setTab}
-          onNavigate={() => setNavOpen(false)}
-        />
+          <BusinessPlant
+            businessName={calc.profile.name}
+            stage={calc.plantStage}
+            leaves={calc.plantLeaves}
+            quickLinks={calc.plantQuickLinks}
+            onNavigate={(nextTab) => {
+              setTab(nextTab)
+              setNavOpen(false)
+            }}
+          />
+        </div>
 
         <div className="sidebar-foot">
           <div className="sidebar-loc">
@@ -128,10 +150,11 @@ export default function App() {
 
           <SummaryStrip
             financial={calc.financial}
-            global={calc.global}
+            monthReal={calc.monthReal}
             rates={calc.rates}
             productCount={calc.products.length}
-            onGoResult={() => setTab('resultado')}
+            pressurePct={calc.pressurePct}
+            onGoSales={() => setTab('ventas')}
           />
 
           <div
@@ -144,6 +167,7 @@ export default function App() {
               <ProductTable
                 products={calc.products}
                 rates={calc.rates}
+                quoteCtx={calc.quoteCtx}
                 onAdd={calc.addProduct}
                 onUpdate={calc.updateProduct}
                 onRemove={calc.removeProduct}
@@ -154,34 +178,47 @@ export default function App() {
               <WeeklySalesPanel
                 rates={calc.rates}
                 products={calc.products}
+                quoteCtx={calc.quoteCtx}
                 iprAlertPct={calc.iprAlertPct}
+                monthReal={calc.monthReal}
                 onIprAlertChange={calc.setIprAlertPct}
                 summary={calc.weeklySalesSummary}
-                onAdd={() => calc.addWeeklySale()}
+                onAddDailySale={calc.addDailySaleLine}
                 onUpdate={calc.updateWeeklySale}
                 onRemove={calc.removeWeeklySale}
                 onFillRates={calc.fillWeeklyRatesFromCurrent}
-                onAddLine={calc.addWeeklySaleLine}
                 onUpdateLine={calc.updateWeeklySaleLine}
                 onRemoveLine={calc.removeWeeklySaleLine}
                 onGoInventory={() => setTab('productos')}
               />
             )}
 
+            {tab === 'crecimiento' && (
+              <GrowthPreview activeStage={calc.plantStage} />
+            )}
+
             {tab === 'finanzas' && (
               <div className="cards-grid">
                 <FinancialSummary
                   financial={calc.financial}
+                  global={calc.global}
                   rates={calc.rates}
                   reinvPct={calc.reinvPct}
-                  onReinvChange={calc.setReinvPct}
+                  onGoCapital={() => setTab('capital')}
+                  onGoDeudas={() => setTab('deudas')}
+                  onApplySobrevivir={() => calc.setDistMode('sobrevivir')}
                 />
                 <IncomeDistribution
                   dist={calc.dist}
                   distSum={calc.distSum}
                   venBs={calc.financial.venBs}
                   rates={calc.rates}
+                  distMode={calc.distMode}
+                  distManual={calc.distManual}
+                  suggestion={calc.distSuggestion}
                   onChange={calc.setDistValue}
+                  onModeChange={calc.setDistMode}
+                  onRecalculate={() => calc.applySuggestedDist()}
                 />
               </div>
             )}
@@ -251,11 +288,24 @@ export default function App() {
               </div>
             )}
 
+            {tab === 'deudas' && (
+              <DebtsPanel
+                items={calc.debtItems}
+                saldoTotal={calc.global.saldoDeudas}
+                cuotaTotal={calc.global.cuotaDeudas}
+                rates={calc.rates}
+                onUpdate={calc.updateDebtItem}
+                onRemove={calc.removeDebtItem}
+                onAdd={calc.addDebtItem}
+              />
+            )}
+
             {tab === 'resultado' && (
               <>
                 <GlobalOverview
                   financial={calc.financial}
                   global={calc.global}
+                  monthReal={calc.monthReal}
                   rates={calc.rates}
                 />
                 <div className="result-actions">
